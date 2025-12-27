@@ -1,159 +1,522 @@
 #include <iostream>
 #include <cmath>
 #include <windows.h>
+#include <vector>
+#include <algorithm>
+#include <fstream>
+#include <cstdint>
 
 using namespace std;
 
+const int MAX_CONFIGS = 100;
+const char* DATA_FILENAME = "configs.bin";
+
 struct Configuration
 {
-	unsigned int serialNumber;
-	string brand;
-	string model;
-	string CPU;
-	string cpuManufacturer;
-	unsigned short int cores;
-	unsigned short int RAM;
-	double price;
-	bool isSold;
+    unsigned int serialNumber;
+    string brand;
+    string model;
+    string CPU;
+    string cpuManufacturer;
+    unsigned short int cores;
+    unsigned short int RAM;
+    double price;
+    bool isSold;
 };
+
+void LoadFromFile(Configuration configs[], int& count);
+void SaveToFile(Configuration configs[], int count);
 
 void Menu(Configuration configs[], int& count);
 void AddConfigs(Configuration configs[], int& count);
 void ShowAll(Configuration configs[], int count);
 bool SerialExists(Configuration configs[], int count, unsigned int serial);
 
+void ShowMaxRAM(Configuration configs[], int count);
+void SearchByCPUManufacturer(Configuration configs[], int count);
+void SortByPrice(Configuration configs[], int count);
+void SubmenuExtra(Configuration configs[], int count); 
+void ShowUnsoldSortedBySerial(Configuration configs[], int count);
+void SearchByBrandAndModel(Configuration configs[], int count);
+void SearchByCriteria(Configuration configs[], int count); 
+void SellBySerial(Configuration configs[], int count); 
+void FileMenu(Configuration configs[], int& count); 
+
 int main()
 {
-	SetConsoleOutputCP(1251);
-	int configCount = 0;
-	Configuration configs[100];
-	
-	while (true) {
-		Menu(configs, configCount);
-	}
+    SetConsoleOutputCP(1251);
+    int configCount = 0;
+    Configuration configs[MAX_CONFIGS];
+
+    LoadFromFile(configs, configCount);
+
+    while (true) {
+        Menu(configs, configCount);
+    }
+
+    return 0;
+}
+
+void SaveToFile(Configuration configs[], int count)
+{
+    ofstream ofs(DATA_FILENAME, ios::binary);
+    if (!ofs) {
+        cout << "Грешка при отваряне на файл за запис: " << DATA_FILENAME << endl;
+        return;
+    }
+
+    uint32_t c = static_cast<uint32_t>(count);
+    ofs.write(reinterpret_cast<const char*>(&c), sizeof(c));
+    for (int i = 0; i < count; ++i) {
+        ofs.write(reinterpret_cast<const char*>(&configs[i].serialNumber), sizeof(configs[i].serialNumber));
+
+        auto writeString = [&](const string& s) {
+            uint32_t len = static_cast<uint32_t>(s.size());
+            ofs.write(reinterpret_cast<const char*>(&len), sizeof(len));
+            if (len) ofs.write(s.data(), len);
+            };
+
+        writeString(configs[i].brand);
+        writeString(configs[i].model);
+        writeString(configs[i].CPU);
+        writeString(configs[i].cpuManufacturer);
+
+        uint16_t cores = configs[i].cores;
+        uint16_t RAM = configs[i].RAM;
+        ofs.write(reinterpret_cast<const char*>(&cores), sizeof(cores));
+        ofs.write(reinterpret_cast<const char*>(&RAM), sizeof(RAM));
+        ofs.write(reinterpret_cast<const char*>(&configs[i].price), sizeof(configs[i].price));
+
+        uint8_t sold = configs[i].isSold ? 1 : 0;
+        ofs.write(reinterpret_cast<const char*>(&sold), sizeof(sold));
+    }
+
+    ofs.close();
+}
+
+void LoadFromFile(Configuration configs[], int& count)
+{
+    ifstream ifs(DATA_FILENAME, ios::binary);
+    if (!ifs) {
+        count = 0;
+        return;
+    }
+
+    uint32_t c = 0;
+    ifs.read(reinterpret_cast<char*>(&c), sizeof(c));
+    int toRead = static_cast<int>(c);
+    if (toRead > MAX_CONFIGS) toRead = MAX_CONFIGS; 
+    count = 0;
+
+    for (int i = 0; i < toRead; ++i) {
+        Configuration cfg;
+        ifs.read(reinterpret_cast<char*>(&cfg.serialNumber), sizeof(cfg.serialNumber));
+        auto readString = [&](string& s) {
+            uint32_t len = 0;
+            ifs.read(reinterpret_cast<char*>(&len), sizeof(len));
+            s.clear();
+            if (len) {
+                s.resize(len);
+                ifs.read(&s[0], len);
+            }
+            };
+
+        readString(cfg.brand);
+        readString(cfg.model);
+        readString(cfg.CPU);
+        readString(cfg.cpuManufacturer);
+
+        uint16_t cores = 0, RAM = 0;
+        ifs.read(reinterpret_cast<char*>(&cores), sizeof(cores));
+        ifs.read(reinterpret_cast<char*>(&RAM), sizeof(RAM));
+        cfg.cores = cores;
+        cfg.RAM = RAM;
+
+        ifs.read(reinterpret_cast<char*>(&cfg.price), sizeof(cfg.price));
+
+        uint8_t sold = 0;
+        ifs.read(reinterpret_cast<char*>(&sold), sizeof(sold));
+        cfg.isSold = (sold != 0);
+
+        configs[count++] = cfg;
+    }
+
+    ifs.close();
 }
 
 void Menu(Configuration configs[], int& count)
 {
-	int choice;
+    int choice;
 
-	cout << "\n=== М Е Н Ю ===\n";
-	cout << "1. Добави нова конфигурация\n";
-	cout << "2. Покажи всички конфигурации\n";
-	cout << "3. Търсене\n"; // TO DO with 3a and 3b. I will think about the addition funcs later
-	cout << "4. Подреждане по цена\n";
-	cout << "5. Работа с файл\n";
-	cout << "6. Изход\n";
+    cout << "\n=== М Е Н Ю ===\n";
+    cout << "1. Добави нова конфигурация\n";
+    cout << "2. Покажи всички конфигурации\n";
+    cout << "3. Търсене и извеждане (подменю)\n";
+    cout << "4. Подреждане по цена (нарастващо)\n";
+    cout << "5. Работа с файл (вмък/извеждане)\n";
+    cout << "6. Подменю допълнително (G)\n";
+    cout << "7. Търсене подходяща конфигурация / Продай (H)\n";
+    cout << "8. Изход (запазва автоматично)\n";
 
-	cout << "Избор: ";
-	cin >> choice;
+    cout << "Избор: ";
+    cin >> choice;
 
-	switch (choice)
-	{
-	case 1: AddConfigs(configs, count); break;
-	case 2: ShowAll(configs, count); break;
-	case 6: exit(0);
-	default: cout << "Невалиден избор!\n";
-	}
+    switch (choice)
+    {
+    case 1: AddConfigs(configs, count); break;
+    case 2: ShowAll(configs, count); break;
+    case 3:
+        cout << "\nТърсене:\n1) Най-голяма RAM\n2) По производител на процесор\nИзбор: ";
+        {
+            int s; cin >> s;
+            if (s == 1) ShowMaxRAM(configs, count);
+            else if (s == 2) SearchByCPUManufacturer(configs, count);
+            else cout << "Невалиден избор.\n";
+        }
+        break;
+    case 4: SortByPrice(configs, count); cout << "Подредено по цена.\n"; break;
+    case 5: FileMenu(configs, count); break;
+    case 6: SubmenuExtra(configs, count); break;
+    case 7: SearchByCriteria(configs, count); break;
+    case 8:
+        SaveToFile(configs, count);
+        cout << "Данните са записани. Край на програмата.\n";
+        exit(0);
+        break;
+    default: cout << "Невалиден избор!\n";
+    }
 }
 
 void AddConfigs(Configuration configs[], int& count)
 {
-	int n;
-	int inputSerial;
-	bool ifSerialExists;
-	cout << "Колко конфигурации искате да добавите? ";
-	cin >> n;
+    int n;
+    unsigned int inputSerial;
+    bool ifSerialExists;
+    cout << "Колко конфигурации искате да добавите? ";
+    cin >> n;
 
-	if (n <= 0) {
-		cout << "Грешен брой!\n";
-		return;
-	}
+    if (n <= 0) {
+        cout << "Грешен брой!\n";
+        return;
+    }
 
-	if (count + n > 100) {
-		cout << "Няма достатъчно място! Свободни: " << (100 - count) << endl;
-		return;
-	}
+    if (count + n > MAX_CONFIGS) {
+        cout << "Няма достатъчно място! Свободни: " << (MAX_CONFIGS - count) << endl;
+        return;
+    }
 
-	for (int i = 0; i < n; i++) {
-		cout << "\nКонфигурация #" << count + 1 << endl;
+    for (int i = 0; i < n; i++) {
+        cout << "\nКонфигурация #" << count + 1 << endl;
 
-		cout << "Сериен номер (8-цифрено число): ";
-		do
-		{
-			cin >> inputSerial;
-			ifSerialExists = SerialExists(configs, count, inputSerial);
-			if (inputSerial < 10000000 || inputSerial > 99999999)
-			{
-				cout << "Грешен сериен номер! Опитайте отново: ";
-			}
-			else if (ifSerialExists == true)
-			{
-				cout << "Серийният номер вече съществува! Опитайте отново: ";
-			}
-			else
-			{
-				configs[count].serialNumber = inputSerial;
-			}
-		} while (inputSerial < 10000000 || inputSerial > 99999999 || ifSerialExists == true); // нека се генерира автоматично по-нататък
+        cout << "Сериен номер (8-цифрено число): ";
+        do
+        {
+            cin >> inputSerial;
+            ifSerialExists = SerialExists(configs, count, inputSerial);
+            if (inputSerial < 10000000 || inputSerial > 99999999)
+            {
+                cout << "Грешен сериен номер! Опитайте отново: ";
+            }
+            else if (ifSerialExists == true)
+            {
+                cout << "Серийният номер вече съществува! Опитайте отново: ";
+            }
+            else
+            {
+                configs[count].serialNumber = inputSerial;
+            }
+        } while (inputSerial < 10000000 || inputSerial > 99999999 || ifSerialExists == true);
 
-		cout << "Марка: ";
-		cin >> configs[count].brand;
+        cout << "Марка: ";
+        cin >> configs[count].brand;
 
-		cout << "Модел: ";
-		cin >> configs[count].model;
+        cout << "Модел: ";
+        cin >> configs[count].model;
 
-		cout << "Процесор: ";
-		cin >> configs[count].CPU;
+        cout << "Процесор (име): ";
+        cin >> configs[count].CPU;
 
-		cout << "Производител на процесора: ";
-		cin >> configs[count].cpuManufacturer;
+        cout << "Производител на процесора: ";
+        cin >> configs[count].cpuManufacturer;
 
-		cout << "Брой ядра: ";
-		cin >> configs[count].cores;
+        cout << "Брой ядра: ";
+        cin >> configs[count].cores;
 
-		cout << "RAM (GB): ";
-		cin >> configs[count].RAM;
+        cout << "RAM (GB): ";
+        cin >> configs[count].RAM;
 
-		cout << "Цена: ";
-		cin >> configs[count].price;
+        cout << "Цена: ";
+        cin >> configs[count].price;
 
-		configs[count].isSold = false; 
+        configs[count].isSold = false;
 
-		count++;
-	}
+        count++;
+    }
 
-	cout << "\nУспешно добавени " << n << " конфигурации.\n" << endl;
+    cout << "\nУспешно добавени " << n << " конфигурации.\n" << endl;
+
+    // SaveToFile(configs, count);
 }
 
 void ShowAll(Configuration configs[], int count)
 {
-	if (count == 0) {
-		cout << "Няма въведени конфигурации.\n";
-		return;
-	}
+    if (count == 0) {
+        cout << "Няма въведени конфигурации.\n";
+        return;
+    }
 
-	cout << "\n=== ВСИЧКИ КОНФИГУРАЦИИ ===\n";
+    cout << "\n=== ВСИЧКИ КОНФИГУРАЦИИ ===\n";
 
-	for (int i = 0; i < count; i++) {
-		cout << "\n#" << i + 1 << endl;
-		cout << "Сериен номер: " << configs[i].serialNumber << endl;
-		cout << "Марка: " << configs[i].brand << endl;
-		cout << "Модел: " << configs[i].model << endl;
-		cout << "Процесор: " << configs[i].CPU << endl;
-		cout << "CPU производител: " << configs[i].cpuManufacturer << endl;
-		cout << "Ядра: " << configs[i].cores << endl;
-		cout << "RAM: " << configs[i].RAM << " GB" << endl;
-		cout << "Цена: " << configs[i].price << endl;
-		cout << "Статус: " << (configs[i].isSold ? "Продадена" : "В продажба") << endl;
-	}
+    for (int i = 0; i < count; i++) {
+        cout << "\n#" << i + 1 << endl;
+        cout << "Сериен номер: " << configs[i].serialNumber << endl;
+        cout << "Марка: " << configs[i].brand << endl;
+        cout << "Модел: " << configs[i].model << endl;
+        cout << "Процесор: " << configs[i].CPU << endl;
+        cout << "CPU производител: " << configs[i].cpuManufacturer << endl;
+        cout << "Ядра: " << configs[i].cores << endl;
+        cout << "RAM: " << configs[i].RAM << " GB" << endl;
+        cout << "Цена: " << configs[i].price << endl;
+        cout << "Статус: " << (configs[i].isSold ? "Продадена" : "В продажба") << endl;
+    }
 }
 
 bool SerialExists(Configuration configs[], int count, unsigned int serial)
 {
-	for (int i = 0; i < count; i++) {
-		if (configs[i].serialNumber == serial)
-			return true;
-	}
-	return false; 
+    for (int i = 0; i < count; i++) {
+        if (configs[i].serialNumber == serial)
+            return true;
+    }
+    return false;
 }
+
+void ShowMaxRAM(Configuration configs[], int count)
+{
+    if (count == 0) {
+        cout << "Няма въведени конфигурации.\n";
+        return;
+    }
+
+    unsigned short maxRAM = 0;
+    for (int i = 0; i < count; ++i) {
+        if (configs[i].RAM > maxRAM) maxRAM = configs[i].RAM;
+    }
+
+    cout << "Най-голяма RAM: " << maxRAM << " GB. Конфигурации:\n";
+    for (int i = 0; i < count; ++i) {
+        if (configs[i].RAM == maxRAM) {
+            cout << "- Сер.номер: " << configs[i].serialNumber << " | " << configs[i].brand << " " << configs[i].model << " | RAM: " << configs[i].RAM << "GB | Цена: " << configs[i].price << " | Статус: " << (configs[i].isSold ? "Продадена" : "В продажба") << endl;
+        }
+    }
+}
+
+void SearchByCPUManufacturer(Configuration configs[], int count)
+{
+    if (count == 0) {
+        cout << "Няма въведени конфигурации.\n";
+        return;
+    }
+
+    string manufacturer;
+    cout << "Въведете производител на процесора: ";
+    cin >> manufacturer;
+
+    bool found = false;
+    for (int i = 0; i < count; ++i) {
+        if (_stricmp(configs[i].cpuManufacturer.c_str(), manufacturer.c_str()) == 0) {
+            if (!found) {
+                cout << "Намерени конфигурации:\n";
+                found = true;
+            }
+            cout << "- Сер.номер: " << configs[i].serialNumber << " | " << configs[i].brand << " " << configs[i].model << " | CPU: " << configs[i].CPU << " | RAM: " << configs[i].RAM << "GB | Цена: " << configs[i].price << " | Статус: " << (configs[i].isSold ? "Продадена" : "В продажба") << endl;
+        }
+    }
+    if (!found) cout << "Не са намерени конфигурации за този производител.\n";
+}
+
+void SortByPrice(Configuration configs[], int count)
+{
+    if (count <= 1) {
+        cout << "Няма нужда от сортиране.\n";
+        return;
+    }
+
+    vector<Configuration> v(configs, configs + count);
+    sort(v.begin(), v.end(), [](const Configuration& a, const Configuration& b) {
+        return a.price < b.price;
+        });
+
+    for (int i = 0; i < count; ++i) configs[i] = v[i];
+}
+
+
+void FileMenu(Configuration configs[], int& count)
+{
+    cout << "\nРабота с файл:\n1) Запиши масива във файл (двоичен)\n2) Зареди масива от файл (двоичен)\nИзбор: ";
+    int ch; cin >> ch;
+    if (ch == 1) {
+        SaveToFile(configs, count);
+        cout << "Записано в " << DATA_FILENAME << endl;
+    }
+    else if (ch == 2) {
+        LoadFromFile(configs, count);
+        cout << "Заредено от " << DATA_FILENAME << ". Текущ брой: " << count << endl;
+    }
+    else {
+        cout << "Невалиден избор.\n";
+    }
+}
+
+void SubmenuExtra(Configuration configs[], int count)
+{
+    cout << "\nПодменю G:\n1) Покажи всички непродадени, подредени по сериен номер\n2) Търсене по марка и модел\nИзбор: ";
+    int ch; cin >> ch;
+    if (ch == 1) ShowUnsoldSortedBySerial(configs, count);
+    else if (ch == 2) SearchByBrandAndModel(configs, count);
+    else cout << "Невалиден избор.\n";
+}
+
+void ShowUnsoldSortedBySerial(Configuration configs[], int count)
+{
+    vector<Configuration> unsold;
+    for (int i = 0; i < count; ++i) if (!configs[i].isSold) unsold.push_back(configs[i]);
+
+    if (unsold.empty()) { cout << "Няма непродадени конфигурации.\n"; return; }
+
+    sort(unsold.begin(), unsold.end(), [](const Configuration& a, const Configuration& b) {
+        return a.serialNumber < b.serialNumber;
+        });
+
+    cout << "Непродадени конфигурации (подредени по сериен номер):\n";
+    for (auto& c : unsold) {
+        cout << "- " << c.serialNumber << " | " << c.brand << " " << c.model << " | RAM: " << c.RAM << "GB | Цена: " << c.price << endl;
+    }
+}
+
+void SearchByBrandAndModel(Configuration configs[], int count)
+{
+    if (count == 0) { cout << "Няма въведени конфигурации.\n"; return; }
+    string brand, model;
+    cout << "Въведете марка: "; cin >> brand;
+    cout << "Въведете модел: "; cin >> model;
+
+    bool found = false;
+    for (int i = 0; i < count; ++i) {
+        if (_stricmp(configs[i].brand.c_str(), brand.c_str()) == 0 &&
+            _stricmp(configs[i].model.c_str(), model.c_str()) == 0) {
+            if (!found) { cout << "Намерени:\n"; found = true; }
+            cout << "- " << configs[i].serialNumber << " | CPU: " << configs[i].CPU << " | RAM: " << configs[i].RAM << "GB | Цена: " << configs[i].price << " | " << (configs[i].isSold ? "Продадена" : "В продажба") << endl;
+        }
+    }
+    if (!found) cout << "Не са намерени конфигурации с посочената марка и модел.\n";
+}
+
+void SearchByCriteria(Configuration configs[], int count)
+{
+    if (count == 0) { cout << "Няма въведени конфигурации.\n"; return; }
+
+    cout << "\nТърсене на подходяща конфигурация. Изберете критерий:\n";
+    cout << "1) Марка и модел\n2) Процесор - производител\n3) Брой ядра\n4) RAM памет (минимум)\n5) Максимална цена\nИзбор: ";
+    int ch; cin >> ch;
+
+    vector<int> matches; 
+
+    if (ch == 1) {
+        string brand, model;
+        cout << "Марка: "; cin >> brand;
+        cout << "Модел: "; cin >> model;
+        for (int i = 0; i < count; ++i)
+            if (!configs[i].isSold && _stricmp(configs[i].brand.c_str(), brand.c_str()) == 0 && _stricmp(configs[i].model.c_str(), model.c_str()) == 0)
+                matches.push_back(i);
+    }
+    else if (ch == 2) {
+        string manufacturer;
+        cout << "Производител на процесора: "; cin >> manufacturer;
+        for (int i = 0; i < count; ++i)
+            if (!configs[i].isSold && _stricmp(configs[i].cpuManufacturer.c_str(), manufacturer.c_str()) == 0)
+                matches.push_back(i);
+    }
+    else if (ch == 3) {
+        unsigned short cores; cout << "Брой ядра (точно): "; cin >> cores;
+        for (int i = 0; i < count; ++i)
+            if (!configs[i].isSold && configs[i].cores == cores)
+                matches.push_back(i);
+    }
+    else if (ch == 4) {
+        unsigned short minRAM; cout << "Минимална RAM (GB): "; cin >> minRAM;
+        for (int i = 0; i < count; ++i)
+            if (!configs[i].isSold && configs[i].RAM >= minRAM)
+                matches.push_back(i);
+    }
+    else if (ch == 5) {
+        double maxPrice; cout << "Максимална цена: "; cin >> maxPrice;
+        for (int i = 0; i < count; ++i)
+            if (!configs[i].isSold && configs[i].price <= maxPrice)
+                matches.push_back(i);
+    }
+    else {
+        cout << "Невалиден избор.\n";
+        return;
+    }
+
+    if (matches.empty()) {
+        cout << "Няма намерени конфигурации за избрания критерий.\n";
+        return;
+    }
+
+    cout << "Намерени конфигурации:\n";
+    for (int idx : matches) {
+        auto& c = configs[idx];
+        cout << "- Сер.номер: " << c.serialNumber << " | " << c.brand << " " << c.model << " | CPU: " << c.CPU << " | RAM: " << c.RAM << "GB | Цена: " << c.price << endl;
+    }
+
+    cout << "Желаете ли да продадете някоя от тези конфигурации? (1=Да, 0=Не): ";
+    int sellChoice; cin >> sellChoice;
+    if (sellChoice == 1) {
+        SellBySerial(configs, count);
+    }
+}
+
+void SellBySerial(Configuration configs[], int count)
+{
+    unsigned int serial; cout << "Въведете сериен номер за продажба: "; cin >> serial;
+    int foundIdx = -1;
+    for (int i = 0; i < count; ++i) if (configs[i].serialNumber == serial) { foundIdx = i; break; }
+
+    if (foundIdx == -1) {
+        cout << "Не е открита конфигурация с посочения сериен номер.\n";
+        return;
+    }
+
+    Configuration& cfg = configs[foundIdx];
+
+    if (cfg.isSold) {
+        cout << "Конфигурацията вече не е налична.\n";
+        return;
+    }
+
+    cout << "Намерена: " << cfg.brand << " " << cfg.model << " | Цена: " << cfg.price << endl;
+    cout << "Потвърждавате ли продажбата? (1=Да, 0=Не): ";
+    int confirm; cin >> confirm;
+    if (confirm != 1) { cout << "Продажбата отменена.\n"; return; }
+
+    cout << "Имате ли код за намаление? (1=Да, 0=Не): ";
+    int hasCode; cin >> hasCode;
+    double oldPrice = cfg.price;
+    double newPrice = oldPrice;
+    if (hasCode == 1) {
+        int code; cout << "Въведете 4-цифрен код: "; cin >> code;
+        if (code >= 1000 && code <= 9999 && (code % 56 == 0)) { 
+            newPrice = oldPrice * 0.95; // 5% отстъпка
+            cout << "Код валиден. Приложена 5% отстъпка.\n";
+        }
+        else {
+            cout << "Код невалиден — няма отстъпка.\n";
+        }
+    }
+
+    cfg.isSold = true;
+    cout << "Успешна продажба.\nСтара цена: " << oldPrice << " -> Нова цена: " << newPrice << endl;
+    // По избор: ако искате да съхраните действителна продадена цена можете да добавите поле sellingPrice. Настоящият код маркира като продаден и показва новата цена.
+}
+
