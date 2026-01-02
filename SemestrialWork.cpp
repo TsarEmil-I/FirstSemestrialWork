@@ -159,9 +159,9 @@ void Menu(Configuration configs[], int& count)
     cout << "2. Покажи всички конфигурации\n";
     cout << "3. Търсене и извеждане (подменю)\n";
     cout << "4. Подреждане по цена (нарастващо)\n";
-    cout << "5. Работа с файл (вмък/извеждане)\n";
-    cout << "6. Подменю допълнително (G)\n";
-    cout << "7. Търсене подходяща конфигурация / Продай (H)\n";
+    cout << "5. Работа с файл\n";
+    cout << "6. Допълнително подменю\n";
+    cout << "7. Търсене подходяща конфигурация / Продажба\n";
     cout << "8. Изход (запазва автоматично)\n";
     cout << "Избор: ";
     cin >> choice;
@@ -349,7 +349,7 @@ void FileMenu(Configuration configs[], int& count)
 
 void SubmenuExtra(Configuration configs[], int count)
 {
-    cout << "\nПодменю G:\n1) Покажи всички непродадени, подредени по сериен номер\n2) Търсене по марка и модел\nИзбор: ";
+    cout << "\nПодменю:\n1) Покажи всички непродадени, подредени по сериен номер\n2) Търсене по марка и модел\nИзбор: ";
     int ch; cin >> ch;
     if (ch == 1) ShowUnsoldSortedBySerial(configs, count);
     else if (ch == 2) SearchByBrandAndModel(configs, count);
