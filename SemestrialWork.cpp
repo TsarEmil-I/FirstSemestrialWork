@@ -1,10 +1,9 @@
 #include <iostream>
 #include <cmath>
 #include <windows.h>
-#include <vector>
-#include <algorithm>
 #include <fstream>
 #include <string>
+#include <cstring>
 
 using namespace std;
 
@@ -67,21 +66,21 @@ void SaveToFile(Configuration configs[], int count)
         cout << "Грешка при отваряне на файл за запис: " << DATA_FILENAME << endl;
         return;
     }
-    unsigned int c = static_cast<unsigned int>(count);
-    ofs.write(reinterpret_cast<const char*>(&c), sizeof(c));
+    unsigned int c = (unsigned int)count;
+    ofs.write((const char*)&c, sizeof(c));
     for (int i = 0; i < count; ++i) {
-        ofs.write(reinterpret_cast<const char*>(&configs[i].serialNumber), sizeof(configs[i].serialNumber));
+        ofs.write((const char*)&configs[i].serialNumber, sizeof(configs[i].serialNumber));
         writeStringToStream(ofs, configs[i].brand, MAX_BRAND_LEN);
         writeStringToStream(ofs, configs[i].model, MAX_MODEL_LEN);
         writeStringToStream(ofs, configs[i].CPU, MAX_CPU_LEN);
         writeStringToStream(ofs, configs[i].cpuManufacturer, MAX_CPU_MANUFACTURER_LEN);
         unsigned short cores = configs[i].cores;
         unsigned short RAM = configs[i].RAM;
-        ofs.write(reinterpret_cast<const char*>(&cores), sizeof(cores));
-        ofs.write(reinterpret_cast<const char*>(&RAM), sizeof(RAM));
-        ofs.write(reinterpret_cast<const char*>(&configs[i].price), sizeof(configs[i].price));
+        ofs.write((const char*)&cores, sizeof(cores));
+        ofs.write((const char*)&RAM, sizeof(RAM));
+        ofs.write((const char*)&configs[i].price, sizeof(configs[i].price));
         unsigned char sold = configs[i].isSold ? 1 : 0;
-        ofs.write(reinterpret_cast<const char*>(&sold), sizeof(sold));
+        ofs.write((const char*)&sold, sizeof(sold));
     }
     ofs.close();
 }
@@ -94,25 +93,25 @@ void LoadFromFile(Configuration configs[], int& count)
         return;
     }
     unsigned int c = 0;
-    ifs.read(reinterpret_cast<char*>(&c), sizeof(c));
-    int toRead = static_cast<int>(c);
+    ifs.read((char*)&c, sizeof(c));
+    int toRead = (int)c;
     if (toRead > MAX_CONFIGS) toRead = MAX_CONFIGS;
     count = 0;
     for (int i = 0; i < toRead; ++i) {
         Configuration cfg;
-        ifs.read(reinterpret_cast<char*>(&cfg.serialNumber), sizeof(cfg.serialNumber));
+        ifs.read((char*)&cfg.serialNumber, sizeof(cfg.serialNumber));
         readStringFromStream(ifs, cfg.brand, MAX_BRAND_LEN);
         readStringFromStream(ifs, cfg.model, MAX_MODEL_LEN);
         readStringFromStream(ifs, cfg.CPU, MAX_CPU_LEN);
         readStringFromStream(ifs, cfg.cpuManufacturer, MAX_CPU_MANUFACTURER_LEN);
         unsigned short cores = 0, RAM = 0;
-        ifs.read(reinterpret_cast<char*>(&cores), sizeof(cores));
-        ifs.read(reinterpret_cast<char*>(&RAM), sizeof(RAM));
+        ifs.read((char*)&cores, sizeof(cores));
+        ifs.read((char*)&RAM, sizeof(RAM));
         cfg.cores = cores;
         cfg.RAM = RAM;
-        ifs.read(reinterpret_cast<char*>(&cfg.price), sizeof(cfg.price));
+        ifs.read((char*)&cfg.price, sizeof(cfg.price));
         unsigned char sold = 0;
-        ifs.read(reinterpret_cast<char*>(&sold), sizeof(sold));
+        ifs.read((char*)&sold, sizeof(sold));
         cfg.isSold = (sold != 0);
         configs[count++] = cfg;
     }
@@ -121,15 +120,15 @@ void LoadFromFile(Configuration configs[], int& count)
 
 void writeStringToStream(ofstream& ofs, const string& s, unsigned int maxLen)
 {
-    unsigned int len = static_cast<unsigned int>(min((size_t)maxLen, s.size()));
-    ofs.write(reinterpret_cast<const char*>(&len), sizeof(len));
+    unsigned int len = (s.size() <= (size_t)maxLen) ? (unsigned int)s.size() : maxLen;
+    ofs.write((const char*)&len, sizeof(len));
     if (len) ofs.write(s.data(), len);
 }
 
 void readStringFromStream(ifstream& ifs, string& s, unsigned int maxLen)
 {
     unsigned int len = 0;
-    ifs.read(reinterpret_cast<char*>(&len), sizeof(len));
+    ifs.read((char*)&len, sizeof(len));
     s.clear();
     if (len) {
         string tmp;
@@ -318,11 +317,17 @@ void SortByPrice(Configuration configs[], int count)
         cout << "Няма нужда от сортиране.\n";
         return;
     }
-    vector<Configuration> v(configs, configs + count);
-    sort(v.begin(), v.end(), [](const Configuration& a, const Configuration& b) {
-        return a.price < b.price;
-        });
-    for (int i = 0; i < count; ++i) configs[i] = v[i];
+    for (int i = 0; i < count - 1; ++i) {
+        int minIdx = i;
+        for (int j = i + 1; j < count; ++j) {
+            if (configs[j].price < configs[minIdx].price) minIdx = j;
+        }
+        if (minIdx != i) {
+            Configuration tmp = configs[i];
+            configs[i] = configs[minIdx];
+            configs[minIdx] = tmp;
+        }
+    }
 }
 
 void FileMenu(Configuration configs[], int& count)
@@ -353,15 +358,24 @@ void SubmenuExtra(Configuration configs[], int count)
 
 void ShowUnsoldSortedBySerial(Configuration configs[], int count)
 {
-    vector<Configuration> unsold;
-    for (int i = 0; i < count; ++i) if (!configs[i].isSold) unsold.push_back(configs[i]);
-    if (unsold.empty()) { cout << "Няма непродадени конфигурации.\n"; return; }
-    sort(unsold.begin(), unsold.end(), [](const Configuration& a, const Configuration& b) {
-        return a.serialNumber < b.serialNumber;
-        });
+    Configuration unsold[MAX_CONFIGS];
+    int unsoldCount = 0;
+    for (int i = 0; i < count; ++i) if (!configs[i].isSold) { unsold[unsoldCount++] = configs[i]; }
+    if (unsoldCount == 0) { cout << "Няма непродадени конфигурации.\n"; return; }
+    for (int i = 0; i < unsoldCount - 1; ++i) {
+        int minIdx = i;
+        for (int j = i + 1; j < unsoldCount; ++j) {
+            if (unsold[j].serialNumber < unsold[minIdx].serialNumber) minIdx = j;
+        }
+        if (minIdx != i) {
+            Configuration tmp = unsold[i];
+            unsold[i] = unsold[minIdx];
+            unsold[minIdx] = tmp;
+        }
+    }
     cout << "Непродадени конфигурации (подредени по сериен номер):\n";
-    for (auto& c : unsold) {
-        cout << "- " << c.serialNumber << " | " << c.brand << " " << c.model << " | RAM: " << c.RAM << "GB | Цена: " << c.price << endl;
+    for (int i = 0; i < unsoldCount; ++i) {
+        cout << "- " << unsold[i].serialNumber << " | " << unsold[i].brand << " " << unsold[i].model << " | RAM: " << unsold[i].RAM << "GB | Цена: " << unsold[i].price << endl;
     }
 }
 
@@ -388,52 +402,53 @@ void SearchByCriteria(Configuration configs[], int count)
     cout << "\nТърсене на подходяща конфигурация. Изберете критерий:\n";
     cout << "1) Марка и модел\n2) Процесор - производител\n3) Брой ядра\n4) RAM памет (минимум)\n5) Максимална цена\nИзбор: ";
     int ch; cin >> ch;
-    vector<int> matches;
+    int matches[MAX_CONFIGS];
+    int matchesCount = 0;
     if (ch == 1) {
         string brand, model;
         readStringInput("Марка: ", brand, MAX_BRAND_LEN);
         readStringInput("Модел: ", model, MAX_MODEL_LEN);
         for (int i = 0; i < count; ++i)
             if (!configs[i].isSold && _stricmp(configs[i].brand.c_str(), brand.c_str()) == 0 && _stricmp(configs[i].model.c_str(), model.c_str()) == 0)
-                matches.push_back(i);
+                matches[matchesCount++] = i;
     }
     else if (ch == 2) {
         string manufacturer;
         readStringInput("Производител на процесора: ", manufacturer, MAX_CPU_MANUFACTURER_LEN);
         for (int i = 0; i < count; ++i)
             if (!configs[i].isSold && _stricmp(configs[i].cpuManufacturer.c_str(), manufacturer.c_str()) == 0)
-                matches.push_back(i);
+                matches[matchesCount++] = i;
     }
     else if (ch == 3) {
         unsigned short cores; cout << "Брой ядра (точно): "; cin >> cores;
         for (int i = 0; i < count; ++i)
             if (!configs[i].isSold && configs[i].cores == cores)
-                matches.push_back(i);
+                matches[matchesCount++] = i;
     }
     else if (ch == 4) {
         unsigned short minRAM; cout << "Минимална RAM (GB): "; cin >> minRAM;
         for (int i = 0; i < count; ++i)
             if (!configs[i].isSold && configs[i].RAM >= minRAM)
-                matches.push_back(i);
+                matches[matchesCount++] = i;
     }
     else if (ch == 5) {
         double maxPrice; cout << "Максимална цена: "; cin >> maxPrice;
         for (int i = 0; i < count; ++i)
             if (!configs[i].isSold && configs[i].price <= maxPrice)
-                matches.push_back(i);
+                matches[matchesCount++] = i;
     }
     else {
         cout << "Невалиден избор.\n";
         return;
     }
-    if (matches.empty()) {
+    if (matchesCount == 0) {
         cout << "Няма намерени конфигурации за избрания критерий.\n";
         return;
     }
     cout << "Намерени конфигурации:\n";
-    for (int idx : matches) {
-        auto& c = configs[idx];
-        cout << "- Сер.номер: " << c.serialNumber << " | " << c.brand << " " << c.model << " | CPU: " << c.CPU << " | RAM: " << c.RAM << "GB | Цена: " << c.price << endl;
+    for (int i = 0; i < matchesCount; ++i) {
+        int idx = matches[i];
+        cout << "- Сер.номер: " << configs[idx].serialNumber << " | " << configs[idx].brand << " " << configs[idx].model << " | CPU: " << configs[idx].CPU << " | RAM: " << configs[idx].RAM << "GB | Цена: " << configs[idx].price << endl;
     }
     cout << "Желаете ли да продадете някоя от тези конфигурации? (1=Да, 0=Не): ";
     int sellChoice; cin >> sellChoice;
